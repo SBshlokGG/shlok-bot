@@ -11,9 +11,9 @@ from typing import Dict, List, Optional
 # 🔑 BOT CREDENTIALS
 # ═══════════════════════════════════════════════════════════════
 
-# Read from environment variable (for Replit/cloud deployment)
-# Falls back to hardcoded token if env var not set
-BOT_TOKEN = os.environ.get('BOT_TOKEN', "MTA5Nzg3ODE1MTcxMzAxNzg5Ng.G6Sobt.0E9uM7AA685aR6DS7PBUBkPfS1qZT2vUgHqKlI")
+# Read from environment variable (for Render/cloud deployment)
+# IMPORTANT: Set BOT_TOKEN as environment variable in Render
+BOT_TOKEN = os.environ.get('BOT_TOKEN', 'YOUR_TOKEN_HERE')
 APPLICATION_ID = "1097878151713017896"
 PUBLIC_KEY = "f2c775c1330a7202c71f9ad691bee729da46aecf0d883291dc13dd9735293341"
 

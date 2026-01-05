@@ -61,7 +61,7 @@
 2. Add new secret:
    ```
    Name: BOT_TOKEN
-   Value: MTA5Nzg3ODE1MTcxMzAxNzg5Ng.G6Sobt.0E9uM7AA685aR6DS7PBUBkPfS1qZT2vUgHqKlI
+   Value: YOUR_BOT_TOKEN_HERE
    ```
 3. Click **"Add Secret"** ✅
 

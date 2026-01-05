@@ -221,7 +221,7 @@ worker: python3 run.py
 
 ### **Step 2: .env file (Create in your /Shlok folder)**
 ```
-BOT_TOKEN=MTA5Nzg3ODE1MTcxMzAxNzg5Ng.G6Sobt.0E9uM7AA685aR6DS7PBUBkPfS1qZT2vUgHqKlI
+BOT_TOKEN=YOUR_BOT_TOKEN_HERE
 ```
 
 ### **Step 3: Push to Railway**
