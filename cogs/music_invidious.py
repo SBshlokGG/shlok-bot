@@ -196,12 +196,13 @@ class MusicPlayer:
         self.current = None
         self.is_playing = False
         self.is_paused = False
+        self.instance = 'https://invidious.io'  # Default instance
     
     async def play_song(self, song: Song):
         """Play a song"""
         try:
-            # Extract stream URL
-            await song.extract_stream()
+            # Extract stream URL from Invidious
+            await song.extract_stream(self.instance)
             
             if not song.stream_url:
                 logger.error("❌ Could not extract stream URL")
@@ -232,10 +233,10 @@ class MusicInvidious(commands.Cog):
         self.bot = bot
         self.players = {}
     
-    def get_player(self, ctx) -> MusicPlayer:
-        if ctx.guild.id not in self.players:
-            self.players[ctx.guild.id] = MusicPlayer()
-        return self.players[ctx.guild.id]
+    def get_player(self, guild_id: int) -> MusicPlayer:
+        if guild_id not in self.players:
+            self.players[guild_id] = MusicPlayer()
+        return self.players[guild_id]
     
     @app_commands.command(name="play", description="▶️ Play a song")
     @app_commands.describe(query="Song name or URL")
@@ -267,10 +268,14 @@ class MusicInvidious(commands.Cog):
                 return await interaction.followup.send("❌ **No results found!**", ephemeral=True)
             
             song = songs[0]
-            player = self.get_player(interaction)
+            player = self.get_player(interaction.guild.id)
+            
+            # Store the instance for future use
+            if instance:
+                player.instance = instance
             
             # Extract stream from Invidious (not YouTube!)
-            await song.extract_stream(instance or INVIDIOUS_INSTANCES[0])
+            await song.extract_stream(player.instance)
             
             if not song.stream_url:
                 return await interaction.followup.send("❌ **Could not extract audio stream!**", ephemeral=True)
@@ -338,7 +343,7 @@ class MusicInvidious(commands.Cog):
     @app_commands.command(name="queue", description="📋 Show queue")
     async def queue(self, interaction: discord.Interaction):
         """Show the current queue"""
-        player = self.get_player(interaction)
+        player = self.get_player(interaction.guild.id)
         
         if not player.queue:
             return await interaction.response.send_message("📋 **Queue is empty!**", ephemeral=True)
