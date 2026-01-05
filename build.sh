@@ -1,11 +1,11 @@
 #!/bin/bash
-# Build script for Render - installs FFmpeg, Opus, and Python dependencies
+# Build script for Render - installs FFmpeg and Python dependencies
 
 echo "📦 Installing system dependencies..."
-apt-get update
-apt-get install -y ffmpeg libopus0 libopus-dev
+apt-get update -qq
+apt-get install -y --no-install-recommends ffmpeg libopus0 2>/dev/null
 
 echo "📦 Installing Python dependencies..."
-pip install -r requirements.txt
+pip install --no-cache-dir -r requirements.txt
 
 echo "✅ Build complete!"
