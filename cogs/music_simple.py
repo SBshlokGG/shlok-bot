@@ -113,16 +113,22 @@ class Song:
             data = await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=False))
             
             if not data:
+                logger.warning(f"No data returned for query: {query}")
                 return None
             
             if 'entries' in data:
-                data = data['entries'][0] if data.get('entries') else None
-                if not data:
+                if not data.get('entries'):
+                    logger.warning(f"No entries found for query: {query}")
                     return None
+                data = data['entries'][0]
+            
+            if not data:
+                logger.warning(f"Data is None for query: {query}")
+                return None
             
             return cls(data, requester)
         except Exception as e:
-            logger.error(f"Extract error: {e}")
+            logger.error(f"Extract error for query '{query}': {str(e)}", exc_info=True)
             return None
 
 
