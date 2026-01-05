@@ -1,0 +1,5 @@
+# Data directory for Shlok Music Bot
+# This directory contains:
+# - cache/     : Temporary audio cache
+# - playlists/ : Saved playlists
+# - logs/      : Bot logs

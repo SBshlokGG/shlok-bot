@@ -1,0 +1,32 @@
+# 🎵 Shlok Music Bot - Dependencies
+
+# Core Discord Library
+discord.py[voice]>=2.3.0
+
+# YouTube Audio Extraction
+yt-dlp>=2023.12.0
+
+# Audio Processing
+PyNaCl>=1.5.0
+
+# Async HTTP Client
+aiohttp>=3.9.0
+
+# For performance (Linux/Mac only)
+uvloop>=0.19.0; sys_platform != "win32"
+
+# Lyrics API (optional)
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# Spotify Integration (optional)
+spotipy>=2.23.0
+
+# For better async operations
+asyncio-throttle>=1.0.0
+
+# Logging enhancement (optional)
+colorlog>=6.7.0
+
+# For caching (optional)
+cachetools>=5.3.0

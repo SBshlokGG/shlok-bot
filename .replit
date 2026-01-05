@@ -1,0 +1,12 @@
+run = "python3 run.py"
+entrypoint = "run.py"
+
+[packager]
+language = "python3"
+ignoredPackages = []
+
+[languages.python3]
+pattern = "**/*.py"
+
+[nix]
+channel = "stable-23_05"
