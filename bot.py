@@ -212,6 +212,19 @@ class ShlokMusicBot(commands.Bot):
         
         self.start_time = None
         self.activity_index = 0
+        self.players = {}  # Simple player storage
+    
+    def get_player(self, guild_id):
+        """Get or create a music player for a guild"""
+        if guild_id not in self.players:
+            # Import here to avoid circular imports
+            from core import Queue
+            self.players[guild_id] = {
+                'queue': Queue(),
+                'current': None,
+                'vc': None
+            }
+        return self.players[guild_id]
         
     async def setup_hook(self):
         """Initialize the bot"""
