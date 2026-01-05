@@ -217,10 +217,8 @@ class ShlokMusicBot(commands.Bot):
     def get_player(self, guild_id):
         """Get or create a music player for a guild"""
         if guild_id not in self.players:
-            # Import here to avoid circular imports
-            from core import Queue
             self.players[guild_id] = {
-                'queue': Queue(),
+                'queue': [],  # Simple list instead of Queue class
                 'current': None,
                 'vc': None
             }
