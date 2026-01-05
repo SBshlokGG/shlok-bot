@@ -56,9 +56,10 @@ FFMPEG_OPTIONS = {
 # ═══════════════════════════════════════════════════════════════
 
 class Song:
-    def __init__(self, title: str, url: str, requester: discord.Member, duration: int = 0, thumbnail: str = ''):
+    def __init__(self, title: str, url: str, requester: discord.Member, duration: int = 0, thumbnail: str = '', video_id: str = ''):
         self.title = title
         self.url = url
+        self.video_id = video_id
         self.requester = requester
         self.duration = duration
         self.thumbnail = thumbnail
@@ -72,31 +73,32 @@ class Song:
         h, m = divmod(m, 60)
         return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
     
-    async def extract_stream(self):
-        """Extract stream URL using yt-dlp"""
+    async def extract_stream(self, instance: str = 'https://invidious.io'):
+        """Extract stream URL from Invidious (not YouTube!)"""
         if self.stream_url:
             return self.stream_url
         
         try:
-            loop = asyncio.get_event_loop()
-            with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ytdl:
-                data = await loop.run_in_executor(
-                    None,
-                    lambda: ytdl.extract_info(self.url, download=False)
-                )
-                
-                if data and 'url' in data:
-                    self.stream_url = data['url']
-                    return self.stream_url
-                
-                # Fallback to best audio format
-                if data and 'formats' in data:
-                    for fmt in data['formats']:
-                        if fmt.get('acodec') != 'none' and fmt.get('url'):
-                            self.stream_url = fmt['url']
-                            return self.stream_url
+            # Use Invidious API to get video data directly
+            async with aiohttp.ClientSession() as session:
+                url = f"{instance}/api/v1/videos/{self.video_id}"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        
+                        # Get best audio format from Invidious
+                        formats = data.get('formatStreams', [])
+                        if formats:
+                            # Find best audio-only format
+                            audio_formats = [f for f in formats if f.get('type', '').startswith('audio')]
+                            if audio_formats:
+                                # Use first audio format (Invidious provides direct stream URLs)
+                                self.stream_url = audio_formats[0].get('url', '')
+                                if self.stream_url:
+                                    logger.info(f"✅ Extracted stream from Invidious for: {self.title}")
+                                    return self.stream_url
         except Exception as e:
-            logger.error(f"Stream extraction error: {str(e)[:100]}")
+            logger.debug(f"Invidious stream extraction failed: {str(e)[:100]}")
         
         return None
     
@@ -110,7 +112,7 @@ class Song:
             return None
 
 # ═══════════════════════════════════════════════════════════════
-# 🔍 INVIDIOUS SEARCH
+# 🔍 MUSIC SEARCH (INVIDIOUS API - NO BOT DETECTION)
 # ═══════════════════════════════════════════════════════════════
 
 async def search_invidious(query: str, limit: int = 5) -> list[dict]:
@@ -138,78 +140,51 @@ async def search_invidious(query: str, limit: int = 5) -> list[dict]:
     
     return []
 
-async def search_youtube_fallback(query: str, limit: int = 1) -> list[dict]:
-    """
-    Fallback: Search using yt-dlp ytsearch
-    """
-    try:
-        loop = asyncio.get_event_loop()
-        
-        with yt_dlp.YoutubeDL({**YTDL_OPTIONS, 'extract_flat': True}) as ytdl:
-            data = await loop.run_in_executor(
-                None,
-                lambda: ytdl.extract_info(f"ytsearch{limit}:{query}", download=False)
-            )
-            
-            if data and 'entries' in data:
-                return data['entries'][:limit]
-    except Exception as e:
-        logger.debug(f"YouTube fallback search error: {str(e)[:50]}")
-    
-    return []
-
-async def search_music(query: str, requester: discord.Member, limit: int = 1) -> list[Song]:
+async def search_music(query: str, requester: discord.Member, limit: int = 1) -> tuple[list[Song], str]:
     """
     Search for music using Invidious (primary) or YouTube fallback
+    
+    Returns:
+        Tuple of (songs_list, instance_used)
     """
+    instance_used = None
+    
     # Try Invidious first (no bot detection)
     logger.info(f"🔍 Searching Invidious for: {query}")
-    results = await search_invidious(query, limit)
+    for instance in INVIDIOUS_INSTANCES:
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{instance}/api/v1/search?q={query}&type=video"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        results = await resp.json()
+                        
+                        if results:
+                            instance_used = instance
+                            songs = []
+                            for result in results[:limit]:
+                                try:
+                                    title = result.get('title', 'Unknown')
+                                    video_id = result.get('videoId', '')
+                                    duration = result.get('lengthSeconds', 0)
+                                    thumbnail = result.get('thumbnail', '')
+                                    
+                                    if video_id:
+                                        url = f"https://www.youtube.com/watch?v={video_id}"
+                                        song = Song(title, url, requester, int(duration) if duration else 0, thumbnail, video_id)
+                                        songs.append(song)
+                                except:
+                                    continue
+                            
+                            if songs:
+                                logger.info(f"✅ Found {len(songs)} song(s) on Invidious ({instance})")
+                                return songs, instance_used
+        except Exception as e:
+            logger.debug(f"Invidious instance {instance} failed: {str(e)[:50]}")
+            continue
     
-    if results:
-        songs = []
-        for result in results:
-            try:
-                title = result.get('title', 'Unknown')
-                video_id = result.get('videoId', '')
-                duration = result.get('lengthSeconds', 0)
-                thumbnail = result.get('thumbnail', '')
-                
-                if video_id:
-                    url = f"https://www.youtube.com/watch?v={video_id}"
-                    song = Song(title, url, requester, int(duration) if duration else 0, thumbnail)
-                    songs.append(song)
-            except:
-                continue
-        
-        if songs:
-            logger.info(f"✅ Found {len(songs)} song(s) on Invidious")
-            return songs
-    
-    # Fallback to YouTube
-    logger.info(f"⚠️ Invidious failed, trying YouTube fallback for: {query}")
-    results = await search_youtube_fallback(query, limit)
-    
-    if results:
-        songs = []
-        for result in results:
-            try:
-                title = result.get('title', 'Unknown')
-                url = result.get('url') or result.get('webpage_url', '')
-                duration = result.get('duration', 0)
-                
-                if url:
-                    song = Song(title, url, requester, duration)
-                    songs.append(song)
-            except:
-                continue
-        
-        if songs:
-            logger.info(f"✅ Found {len(songs)} song(s) on YouTube")
-            return songs
-    
-    logger.warning(f"❌ No results found for: {query}")
-    return []
+    logger.warning(f"❌ All Invidious instances failed for: {query}")
+    return [], None
 
 # ═══════════════════════════════════════════════════════════════
 # 🎵 MUSIC PLAYER
@@ -285,8 +260,8 @@ class MusicInvidious(commands.Cog):
         await interaction.followup.send(f"🔍 **Searching:** `{query}`...")
         
         try:
-            # Search for music (uses Invidious, fallback to YouTube)
-            songs = await search_music(query, interaction.user, limit=1)
+            # Search for music using Invidious
+            songs, instance = await search_music(query, interaction.user, limit=1)
             
             if not songs:
                 return await interaction.followup.send("❌ **No results found!**", ephemeral=True)
@@ -294,11 +269,11 @@ class MusicInvidious(commands.Cog):
             song = songs[0]
             player = self.get_player(interaction)
             
-            # Extract stream
-            await song.extract_stream()
+            # Extract stream from Invidious (not YouTube!)
+            await song.extract_stream(instance or INVIDIOUS_INSTANCES[0])
             
             if not song.stream_url:
-                return await interaction.followup.send("❌ **Could not get audio stream!**", ephemeral=True)
+                return await interaction.followup.send("❌ **Could not extract audio stream!**", ephemeral=True)
             
             # Play or queue
             if vc.is_playing() or vc.is_paused():
