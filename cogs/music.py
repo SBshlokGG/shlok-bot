@@ -141,7 +141,10 @@ class Music(commands.Cog, name="Music"):
             description=f"Looking for: **{query}**",
             color=config.BOT_COLOR
         )
-        loading_msg = await ctx.send(embed=loading_embed)
+        try:
+            loading_msg = await ctx.interaction.followup.send(embed=loading_embed)
+        except:
+            loading_msg = await ctx.send(embed=loading_embed)
         
         try:
             # Search for tracks
@@ -153,7 +156,10 @@ class Music(commands.Cog, name="Music"):
                     description=f"No results found for: **{query}**",
                     color=config.BOT_COLOR_ERROR
                 )
-                await loading_msg.edit(embed=embed)
+                try:
+                    await loading_msg.edit(embed=embed)
+                except:
+                    await ctx.interaction.followup.send(embed=embed)
                 return
             
             track = tracks[0]
@@ -165,45 +171,60 @@ class Music(commands.Cog, name="Music"):
                     description=f"Track exceeds maximum duration of {config.MUSIC.max_song_duration // 60} minutes",
                     color=config.BOT_COLOR_ERROR
                 )
-                await loading_msg.edit(embed=embed)
+                try:
+                    await loading_msg.edit(embed=embed)
+                except:
+                    await ctx.interaction.followup.send(embed=embed)
                 return
             
             # Add to queue or play immediately
             if player.is_playing or player.is_paused:
-                position = player.queue.add(track)
+                position = len(player.queue) + 1
+                player.queue.append(track)
                 
                 embed = discord.Embed(
                     title="✅ Added to Queue",
                     description=f"**[{track.title}]({track.url})**",
                     color=config.BOT_COLOR_SUCCESS
                 )
-                embed.add_field(name="👤 Artist", value=track.artist or "Unknown", inline=True)
-                embed.add_field(name="⏱️ Duration", value=track.duration_formatted, inline=True)
-                embed.add_field(name="📋 Position", value=f"#{position}", inline=True)
+                embed.add_field(name="Position", value=f"#{position}", inline=False)
                 
-                if track.thumbnail:
-                    embed.set_thumbnail(url=track.thumbnail)
-                
-                embed.set_footer(
-                    text=f"Requested by {ctx.author.display_name}",
-                    icon_url=ctx.author.display_avatar.url
-                )
-                
-                await loading_msg.edit(embed=embed)
+                try:
+                    await loading_msg.edit(embed=embed)
+                except:
+                    await ctx.interaction.followup.send(embed=embed)
             else:
-                await loading_msg.delete()
+                try:
+                    await loading_msg.delete()
+                except:
+                    pass
                 await player.play(track)
+                embed = discord.Embed(
+                    title="▶️ Now Playing",
+                    description=f"**{track.title}**",
+                    color=config.BOT_COLOR_SUCCESS
+                )
+                try:
+                    await ctx.interaction.followup.send(embed=embed)
+                except:
+                    await ctx.send(embed=embed)
             
             self.bot.commands_used += 1
             
         except Exception as e:
-            logger.error(f"Error in play command: {e}")
+            logger.error(f"Error in play command: {e}", exc_info=True)
             embed = discord.Embed(
                 title="❌ Error",
-                description="An error occurred while playing the track. Please try again.",
+                description=f"Error: {str(e)[:80]}",
                 color=config.BOT_COLOR_ERROR
             )
-            await loading_msg.edit(embed=embed)
+            try:
+                await loading_msg.edit(embed=embed)
+            except:
+                try:
+                    await ctx.interaction.followup.send(embed=embed, ephemeral=True)
+                except:
+                    await ctx.send(embed=embed)
     
     # ═══════════════════════════════════════════════════════════
     # 🔍 SEARCH COMMAND
