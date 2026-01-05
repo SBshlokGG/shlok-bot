@@ -178,6 +178,19 @@ logging.basicConfig(
 logger = logging.getLogger('ShlokMusic')
 
 # ═══════════════════════════════════════════════════════════════
+# 🎵 SIMPLE MUSIC PLAYER CLASS
+# ═══════════════════════════════════════════════════════════════
+
+class MusicPlayer:
+    """Simple music player for managing guild audio state"""
+    def __init__(self):
+        self.queue = []
+        self.current = None
+        self.is_playing = False
+        self.is_connected = False
+        self.vc = None
+
+# ═══════════════════════════════════════════════════════════════
 # 🤖 BOT CLASS
 # ═══════════════════════════════════════════════════════════════
 
@@ -217,11 +230,7 @@ class ShlokMusicBot(commands.Bot):
     def get_player(self, guild_id):
         """Get or create a music player for a guild"""
         if guild_id not in self.players:
-            self.players[guild_id] = {
-                'queue': [],  # Simple list instead of Queue class
-                'current': None,
-                'vc': None
-            }
+            self.players[guild_id] = MusicPlayer()
         return self.players[guild_id]
         
     async def setup_hook(self):
