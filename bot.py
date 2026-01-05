@@ -212,17 +212,36 @@ class MusicPlayer:
         self.is_connected = False
         self.vc = None
     
+    async def play(self, track):
+        """Play a track"""
+        if not self.vc:
+            return False
+        try:
+            source = track.create_source()
+            if not source:
+                return False
+            self.vc.play(source, after=lambda e: None)
+            self.current = track
+            self.is_playing = True
+            self.is_paused = False
+            return True
+        except Exception as e:
+            logger.error(f"Error playing track: {e}")
+            return False
+    
     def pause(self):
         """Pause playback"""
         if self.vc and self.vc.is_playing():
             self.vc.pause()
             self.is_paused = True
+            self.is_playing = False
     
     def resume(self):
         """Resume playback"""
         if self.vc and self.vc.is_paused():
             self.vc.resume()
             self.is_paused = False
+            self.is_playing = True
     
     def stop(self):
         """Stop playback"""
