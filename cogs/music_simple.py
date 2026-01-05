@@ -35,24 +35,33 @@ YTDL_OPTIONS = {
     'extract_flat': False,
     'cachedir': False,
     'geo_bypass': True,
-    'socket_timeout': 30,
-    'retries': 5,
+    'socket_timeout': 60,
+    'retries': 10,
+    'fragment_retries': 10,
+    'skip_unavailable_fragments': True,
     'http_headers': {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate',
         'DNT': '1',
         'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Cache-Control': 'max-age=0',
     },
     'extractor_args': {
         'youtube': {
-            'player_client': ['android', 'web'],
-            'player_skip': ['js', 'configs']
+            'player_client': ['android', 'web', 'mweb'],
+            'player_skip': ['js', 'configs'],
+            'skip_webpage': False,
         }
     },
-    'quiet': True,
-    'no_warnings': True,
+    'youtube_include_dash_manifest': False,
+    'writesubtitles': False,
+    'writeautomaticsub': False,
 }
 
 FFMPEG_OPTIONS = {
@@ -122,30 +131,49 @@ class Song:
     @classmethod
     async def from_query(cls, query: str, requester: discord.Member, loop=None) -> Optional['Song']:
         loop = loop or asyncio.get_event_loop()
-        try:
-            if not query.startswith('http'):
-                query = f"ytsearch:{query}"
-            
-            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=False))
-            
-            if not data:
-                logger.warning(f"No data returned for query: {query}")
-                return None
-            
-            if 'entries' in data:
-                if not data.get('entries'):
-                    logger.warning(f"No entries found for query: {query}")
+        max_retries = 3
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                if not query.startswith('http'):
+                    query = f"ytsearch:{query}"
+                
+                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=False))
+                
+                if not data:
+                    logger.warning(f"No data returned for query: {query}")
                     return None
-                data = data['entries'][0]
-            
-            if not data:
-                logger.warning(f"Data is None for query: {query}")
-                return None
-            
-            return cls(data, requester)
-        except Exception as e:
-            logger.error(f"Extract error for query '{query}': {str(e)}", exc_info=True)
-            return None
+                
+                if 'entries' in data:
+                    if not data.get('entries'):
+                        logger.warning(f"No entries found for query: {query}")
+                        return None
+                    data = data['entries'][0]
+                
+                if not data:
+                    logger.warning(f"Data is None for query: {query}")
+                    return None
+                
+                return cls(data, requester)
+            except Exception as e:
+                error_msg = str(e)
+                # Check if it's a bot detection error
+                is_bot_detection = 'bot' in error_msg.lower() or 'sign in' in error_msg.lower()
+                
+                if is_bot_detection and attempt < max_retries - 1:
+                    logger.warning(f"YouTube bot detection (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 1.5  # Exponential backoff
+                    continue
+                else:
+                    if is_bot_detection:
+                        logger.error(f"❌ YouTube is blocking requests after {max_retries} retries. This is a YouTube anti-bot measure.")
+                    else:
+                        logger.error(f"Extract error for query '{query}': {error_msg[:100]}")
+                    return None
+        
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════

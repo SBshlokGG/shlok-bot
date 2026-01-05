@@ -3,8 +3,8 @@
 # Core Discord Library
 discord.py[voice]>=2.3.0
 
-# YouTube Audio Extraction
-yt-dlp>=2025.01.0
+# YouTube Audio Extraction (latest with better bot bypass)
+yt-dlp>=2025.01.10
 
 # Audio Processing
 PyNaCl>=1.5.0
