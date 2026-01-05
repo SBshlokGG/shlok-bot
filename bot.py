@@ -219,7 +219,7 @@ class ShlokMusicBot(commands.Bot):
         
         # Load cogs
         cogs = [
-            'cogs.music_simple',
+            'cogs.music',
             'cogs.utility_new',
         ]
         
