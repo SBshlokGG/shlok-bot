@@ -313,12 +313,16 @@ class ShlokMusicBot(commands.Bot):
                 import traceback
                 traceback.print_exc()
         
-        # Sync slash commands only once
+        # Sync slash commands ONLY once with better error handling
         try:
+            logger.info("🔄 Syncing slash commands...")
             synced = await self.tree.sync()
             logger.info(f"✅ Synced {len(synced)} slash commands globally")
         except Exception as e:
-            logger.error(f"❌ Failed to sync: {e}")
+            if "429" in str(e) or "rate limit" in str(e).lower():
+                logger.warning("⚠️ Discord rate limited. Commands will sync on next restart.")
+            else:
+                logger.error(f"❌ Failed to sync: {e}")
     
     async def on_ready(self):
         """Bot is ready"""
@@ -330,6 +334,7 @@ class ShlokMusicBot(commands.Bot):
         logger.info(f"👥 Users: {sum(g.member_count for g in self.guilds):,}")
         logger.info(f"🤖 {self.user} (ID: {self.user.id})")
         logger.info(f"📡 Latency: {round(self.latency * 1000)}ms")
+        logger.info(f"✅ Prefixes: {config.BOT_PREFIXES}")
         logger.info("━" * 50)
         
         if not self.rotate_activity.is_running():
@@ -388,10 +393,18 @@ async def main():
         # Start web server for UptimeRobot monitoring
         web_runner = await start_web_server()
         
-        # Start the bot
-        await bot.start(config.BOT_TOKEN)
+        # Start the bot with rate limit handling
+        try:
+            await bot.start(config.BOT_TOKEN)
+        except discord.errors.HTTPException as e:
+            if "429" in str(e):
+                logger.warning("⚠️ Discord rate limited. Reconnecting in 60 seconds...")
+                await asyncio.sleep(60)
+                await bot.start(config.BOT_TOKEN)
+            else:
+                raise
     except discord.LoginFailure:
-        logger.critical("❌ Invalid token!")
+        logger.critical("❌ Invalid bot token!")
     except Exception as e:
         logger.critical(f"❌ Error: {e}")
     finally:
