@@ -217,7 +217,7 @@ class MusicPlayer:
         if not self.vc:
             return False
         try:
-            source = track.create_source()
+            source = await track.get_source()
             if not source:
                 return False
             self.vc.play(source, after=lambda e: None)
@@ -286,6 +286,7 @@ class ShlokMusicBot(commands.Bot):
         self.start_time = None
         self.activity_index = 0
         self.players = {}  # Simple player storage
+        self.commands_used = 0  # Track total commands executed
     
     def get_player(self, guild_id):
         """Get or create a music player for a guild"""
