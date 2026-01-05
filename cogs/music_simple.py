@@ -471,50 +471,65 @@ class MusicSimple(commands.Cog, name="Music"):
     @app_commands.command(name="play", description="🎵 Play a song")
     @app_commands.describe(query="Song name or YouTube URL")
     async def play(self, interaction: discord.Interaction, *, query: str):
+        # Acknowledge the interaction immediately to avoid timeout
+        await interaction.response.defer()
+        
         ctx = await commands.Context.from_interaction(interaction)
         if self._check_duplicate_invoke(ctx):
             return
-        if not await self.ensure_voice(ctx):
+        
+        # Check voice channel
+        if not ctx.author.voice or not ctx.author.voice.channel:
+            await interaction.followup.send("❌ You must be in a voice channel!", ephemeral=True)
             return
+        
+        # Connect to voice if not already connected
+        if not ctx.voice_client:
+            try:
+                await ctx.author.voice.channel.connect(timeout=30.0, reconnect=True, self_deaf=True)
+            except Exception as e:
+                logger.error(f"Connect error: {e}")
+                await interaction.followup.send(f"❌ Could not connect to voice: {str(e)[:50]}", ephemeral=True)
+                return
         
         player = self.get_player(ctx)
         
-        embed = discord.Embed(
+        # Send initial search message
+        search_embed = discord.Embed(
             description=f"🔍 **Searching:** `{query}`",
             color=0x3498DB
         )
-        loading = await ctx.send(embed=embed)
+        await interaction.followup.send(embed=search_embed)
         
         try:
             song = await Song.from_query(query, ctx.author, self.bot.loop)
             
             if not song:
-                embed = discord.Embed(description="❌ **No results found!**", color=0xE74C3C)
-                return await loading.edit(embed=embed, delete_after=5)
+                error_embed = discord.Embed(description="❌ **No results found!**", color=0xE74C3C)
+                return await interaction.followup.send(embed=error_embed)
             
             if not song.stream_url:
-                embed = discord.Embed(description="❌ **Could not get audio stream!**", color=0xE74C3C)
-                return await loading.edit(embed=embed, delete_after=5)
+                error_embed = discord.Embed(description="❌ **Could not get audio stream!**", color=0xE74C3C)
+                return await interaction.followup.send(embed=error_embed)
             
             vc = ctx.voice_client
             
             if vc and (vc.is_playing() or vc.is_paused()):
                 player.queue.append(song)
-                embed = discord.Embed(color=0x2ECC71)
-                embed.description = f"✅ **Added to Queue** • Position #{len(player.queue)}\n\n"
-                embed.description += f"🎵 **[{song.title}]({song.url})**\n"
-                embed.description += f"```yaml\nDuration: {song.duration_str}\n```"
+                queue_embed = discord.Embed(color=0x2ECC71)
+                queue_embed.description = f"✅ **Added to Queue** • Position #{len(player.queue)}\n\n"
+                queue_embed.description += f"🎵 **[{song.title}]({song.url})**\n"
+                queue_embed.description += f"```yaml\nDuration: {song.duration_str}\n```"
                 if song.thumbnail:
-                    embed.set_thumbnail(url=song.thumbnail)
-                await loading.edit(embed=embed, delete_after=10)
+                    queue_embed.set_thumbnail(url=song.thumbnail)
+                await interaction.followup.send(embed=queue_embed)
             else:
-                await loading.delete()
                 await player.play_song(song)
                 
         except Exception as e:
-            logger.error(f"Play error: {e}")
-            embed = discord.Embed(description=f"❌ **Error:** {str(e)[:100]}", color=0xE74C3C)
-            await loading.edit(embed=embed, delete_after=5)
+            logger.error(f"Play error: {e}", exc_info=True)
+            error_embed = discord.Embed(description=f"❌ **Error:** {str(e)[:100]}", color=0xE74C3C)
+            await interaction.followup.send(embed=error_embed)
     
     @app_commands.command(name="pause", description="⏸️ Pause playback")
     async def pause(self, interaction: discord.Interaction):
