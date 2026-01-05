@@ -189,6 +189,27 @@ class MusicPlayer:
         self.is_playing = False
         self.is_connected = False
         self.vc = None
+    
+    async def connect(self, channel):
+        """Connect to a voice channel"""
+        try:
+            self.vc = await channel.connect(timeout=10.0, reconnect=True)
+            self.is_connected = True
+            return True
+        except Exception as e:
+            logger.error(f"Failed to connect to voice: {e}")
+            self.is_connected = False
+            return False
+    
+    async def disconnect(self):
+        """Disconnect from voice channel"""
+        if self.vc:
+            try:
+                await self.vc.disconnect()
+            except:
+                pass
+        self.is_connected = False
+        self.vc = None
 
 # ═══════════════════════════════════════════════════════════════
 # 🤖 BOT CLASS
