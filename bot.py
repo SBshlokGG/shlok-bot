@@ -187,13 +187,14 @@ class MusicPlayer:
         self.queue = []
         self.current = None
         self.is_playing = False
+        self.is_paused = False
         self.is_connected = False
         self.vc = None
     
     async def connect(self, channel):
         """Connect to a voice channel"""
         try:
-            self.vc = await channel.connect(timeout=10.0, reconnect=True)
+            self.vc = await channel.connect(timeout=10.0, reconnect=True, self_deaf=True)
             self.is_connected = True
             return True
         except Exception as e:
@@ -210,6 +211,25 @@ class MusicPlayer:
                 pass
         self.is_connected = False
         self.vc = None
+    
+    def pause(self):
+        """Pause playback"""
+        if self.vc and self.vc.is_playing():
+            self.vc.pause()
+            self.is_paused = True
+    
+    def resume(self):
+        """Resume playback"""
+        if self.vc and self.vc.is_paused():
+            self.vc.resume()
+            self.is_paused = False
+    
+    def stop(self):
+        """Stop playback"""
+        if self.vc and self.vc.is_playing():
+            self.vc.stop()
+        self.is_playing = False
+        self.is_paused = False
 
 # ═══════════════════════════════════════════════════════════════
 # 🤖 BOT CLASS

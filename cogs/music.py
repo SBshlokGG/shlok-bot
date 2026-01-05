@@ -42,7 +42,10 @@ class Music(commands.Cog, name="Music"):
                 description="You need to be in a voice channel to use this command!",
                 color=config.BOT_COLOR_ERROR
             )
-            await ctx.send(embed=embed, delete_after=10)
+            try:
+                await ctx.interaction.followup.send(embed=embed, ephemeral=True)
+            except:
+                await ctx.send(embed=embed, delete_after=10)
             return False
         
         player = self.get_player(ctx)
@@ -59,7 +62,10 @@ class Music(commands.Cog, name="Music"):
                     description="I need `Connect` and `Speak` permissions in that channel!",
                     color=config.BOT_COLOR_ERROR
                 )
-                await ctx.send(embed=embed, delete_after=10)
+                try:
+                    await ctx.interaction.followup.send(embed=embed, ephemeral=True)
+                except:
+                    await ctx.send(embed=embed, delete_after=10)
                 return False
             
             success = await player.connect(channel)
@@ -69,7 +75,10 @@ class Music(commands.Cog, name="Music"):
                     description="Failed to connect to the voice channel. Please try again.",
                     color=config.BOT_COLOR_ERROR
                 )
-                await ctx.send(embed=embed, delete_after=10)
+                try:
+                    await ctx.interaction.followup.send(embed=embed, ephemeral=True)
+                except:
+                    await ctx.send(embed=embed, delete_after=10)
                 return False
         
         # Store text channel for messages
@@ -114,6 +123,13 @@ class Music(commands.Cog, name="Music"):
             !play https://youtube.com/watch?v=...
             !play Never Gonna Give You Up
         """
+        # Defer the interaction immediately to avoid timeout
+        if not ctx.interaction.response.is_done():
+            try:
+                await ctx.interaction.response.defer()
+            except:
+                pass
+        
         if not await self.ensure_voice(ctx):
             return
         
