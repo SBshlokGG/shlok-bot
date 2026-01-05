@@ -105,7 +105,7 @@ class Track:
     async def _extract_audio_url(self):
         """Extract the direct audio URL"""
         try:
-            # Use yt-dlp to get audio URL
+            # Use yt-dlp to get audio URL with bot bypass headers
             ytdl_opts = {
                 'format': 'bestaudio/best',
                 'noplaylist': True,
@@ -117,6 +117,22 @@ class Track:
                 'default_search': 'ytsearch',
                 'source_address': '0.0.0.0',
                 'extract_flat': False,
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                },
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android', 'web'],
+                        'player_skip': ['js', 'configs']
+                    }
+                },
+                'socket_timeout': 30,
+                'retries': 5,
             }
             
             with yt_dlp.YoutubeDL(ytdl_opts) as ytdl:
