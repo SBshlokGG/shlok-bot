@@ -332,6 +332,14 @@ class MusicSimple(commands.Cog):
             self.players[ctx.guild.id].channel = ctx.channel
         return self.players[ctx.guild.id]
     
+    async def delete_after(self, message, delay: int = 5):
+        """Delete message after delay"""
+        try:
+            await asyncio.sleep(delay)
+            await message.delete()
+        except:
+            pass
+    
     async def ensure_voice(self, ctx: commands.Context) -> bool:
         if not ctx.author.voice:
             embed = discord.Embed(description="❌ **Join a voice channel first!**", color=0xE74C3C)
@@ -391,12 +399,14 @@ class MusicSimple(commands.Cog):
             
             if not song:
                 embed = discord.Embed(description="❌ **No results found!**", color=0xE74C3C)
-                await loading.edit(embed=embed, delete_after=5)
+                await loading.edit(embed=embed)
+                asyncio.create_task(self.delete_after(loading, 5))
                 return
             
             if not song.stream_url:
                 embed = discord.Embed(description="❌ **Could not get audio stream!**", color=0xE74C3C)
-                await loading.edit(embed=embed, delete_after=5)
+                await loading.edit(embed=embed)
+                asyncio.create_task(self.delete_after(loading, 5))
                 return
             
             vc = ctx.voice_client
@@ -410,7 +420,8 @@ class MusicSimple(commands.Cog):
                 embed.description += f"```yaml\nDuration: {song.duration_str}\n```"
                 if song.thumbnail:
                     embed.set_thumbnail(url=song.thumbnail)
-                await loading.edit(embed=embed, delete_after=10)
+                await loading.edit(embed=embed)
+                asyncio.create_task(self.delete_after(loading, 10))
             else:
                 # Play immediately
                 try:
@@ -423,7 +434,8 @@ class MusicSimple(commands.Cog):
             logger.error(f"Play error: {e}")
             embed = discord.Embed(description=f"❌ **Error:** {str(e)[:100]}", color=0xE74C3C)
             try:
-                await loading.edit(embed=embed, delete_after=5)
+                await loading.edit(embed=embed)
+                asyncio.create_task(self.delete_after(loading, 5))
             except:
                 if ctx.interaction:
                     await ctx.interaction.followup.send(embed=embed, ephemeral=True)
