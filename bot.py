@@ -298,9 +298,6 @@ class ShlokMusicBot(commands.Bot):
         """Initialize the bot"""
         logger.info("🔧 Setting up Shlok Music Bot...")
         
-        # Wait a bit to avoid hitting Discord's global rate limits on startup
-        await asyncio.sleep(2)
-        
         # Load cogs
         cogs = [
             'cogs.music_invidious',
@@ -315,31 +312,6 @@ class ShlokMusicBot(commands.Bot):
                 logger.error(f"❌ Failed to load {cog}: {e}")
                 import traceback
                 traceback.print_exc()
-        
-        # Sync slash commands with aggressive rate limit handling
-        max_retries = 5
-        retry_delay = 5  # Start with 5 seconds
-        synced = []
-        
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"🔄 Syncing slash commands (attempt {attempt + 1}/{max_retries})...")
-                synced = await self.tree.sync()
-                logger.info(f"✅ Synced {len(synced)} slash commands globally")
-                break
-            except Exception as e:
-                error_msg = str(e)
-                if '429' in error_msg or 'rate limit' in error_msg.lower():
-                    if attempt < max_retries - 1:
-                        logger.warning(f"⚠️ Discord rate limit hit. Waiting {retry_delay}s before retry {attempt + 1}/{max_retries}...")
-                        await asyncio.sleep(retry_delay)
-                        retry_delay = int(retry_delay * 1.5)  # Increase by 50%
-                    else:
-                        logger.warning(f"⚠️ Rate limit persists after {max_retries} retries. Continuing without sync (commands may take time to appear)")
-                        break
-                else:
-                    logger.error(f"❌ Sync error: {error_msg[:100]}")
-                    break
     
     async def on_ready(self):
         """Bot is ready"""
@@ -353,6 +325,18 @@ class ShlokMusicBot(commands.Bot):
         logger.info(f"📡 Latency: {round(self.latency * 1000)}ms")
         logger.info(f"🔧 Prefixes: {', '.join(config.BOT_PREFIXES)}")
         logger.info("━" * 50)
+        
+        # Sync slash commands on ready (rate limits are usually reset by then)
+        try:
+            logger.info("🔄 Syncing slash commands...")
+            synced = await self.tree.sync()
+            logger.info(f"✅ Synced {len(synced)} slash commands")
+        except Exception as e:
+            error_msg = str(e)
+            if '429' in error_msg:
+                logger.warning(f"⚠️ Rate limited during sync. Commands will sync when available.")
+            else:
+                logger.error(f"⚠️ Sync error: {error_msg[:100]}")
         
         if not self.rotate_activity.is_running():
             self.rotate_activity.start()
