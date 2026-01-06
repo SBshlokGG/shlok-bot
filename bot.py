@@ -313,16 +313,28 @@ class ShlokMusicBot(commands.Bot):
                 import traceback
                 traceback.print_exc()
         
-        # Sync slash commands ONLY once with better error handling
-        try:
-            logger.info("🔄 Syncing slash commands...")
-            synced = await self.tree.sync()
-            logger.info(f"✅ Synced {len(synced)} slash commands globally")
-        except Exception as e:
-            if "429" in str(e) or "rate limit" in str(e).lower():
-                logger.warning("⚠️ Discord rate limited. Commands will sync on next restart.")
-            else:
-                logger.error(f"❌ Failed to sync: {e}")
+        # Sync slash commands with exponential backoff (rate limit safe)
+        max_retries = 3
+        retry_delay = 2
+        synced = []
+        
+        for attempt in range(max_retries):
+            try:
+                synced = await self.tree.sync()
+                logger.info(f"✅ Synced {len(synced)} slash commands globally")
+                break
+            except Exception as e:
+                error_msg = str(e)
+                if '429' in error_msg or 'rate limit' in error_msg.lower():
+                    if attempt < max_retries - 1:
+                        logger.warning(f"⚠️ Rate limited. Retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                    else:
+                        logger.error(f"❌ Failed to sync after {max_retries} retries: {error_msg[:100]}")
+                else:
+                    logger.error(f"❌ Failed to sync: {error_msg[:100]}")
+                    break
     
     async def on_ready(self):
         """Bot is ready"""
@@ -334,7 +346,7 @@ class ShlokMusicBot(commands.Bot):
         logger.info(f"👥 Users: {sum(g.member_count for g in self.guilds):,}")
         logger.info(f"🤖 {self.user} (ID: {self.user.id})")
         logger.info(f"📡 Latency: {round(self.latency * 1000)}ms")
-        logger.info(f"✅ Prefixes: {config.BOT_PREFIXES}")
+        logger.info(f"🔧 Prefixes: {', '.join(config.BOT_PREFIXES)}")
         logger.info("━" * 50)
         
         if not self.rotate_activity.is_running():
@@ -393,18 +405,10 @@ async def main():
         # Start web server for UptimeRobot monitoring
         web_runner = await start_web_server()
         
-        # Start the bot with rate limit handling
-        try:
-            await bot.start(config.BOT_TOKEN)
-        except discord.errors.HTTPException as e:
-            if "429" in str(e):
-                logger.warning("⚠️ Discord rate limited. Reconnecting in 60 seconds...")
-                await asyncio.sleep(60)
-                await bot.start(config.BOT_TOKEN)
-            else:
-                raise
+        # Start the bot
+        await bot.start(config.BOT_TOKEN)
     except discord.LoginFailure:
-        logger.critical("❌ Invalid bot token!")
+        logger.critical("❌ Invalid token!")
     except Exception as e:
         logger.critical(f"❌ Error: {e}")
     finally:
