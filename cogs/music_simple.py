@@ -98,27 +98,26 @@ class Song:
         if not self.stream_url:
             return None
         try:
-            return discord.FFmpegPCMAudio(self.stream_url, **FFMPEG_OPTIONS)
+            return discord.FFmpegPCMAudio(
+                self.stream_url,
+                **FFMPEG_OPTIONS
+            )
         except Exception as e:
-            logger.error(f"FFmpeg error: {e}")
+            logger.error(f"Source creation error: {e}")
             return None
     
     @classmethod
     async def from_query(cls, query: str, requester: discord.Member, loop=None) -> Optional['Song']:
-        loop = loop or asyncio.get_event_loop()
         try:
-            if not query.startswith('http'):
-                query = f"ytsearch:{query}"
+            def ytdl_extract():
+                with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
+                    return ydl.extract_info(query, download=False)
             
-            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=False))
+            loop = loop or asyncio.get_event_loop()
+            data = await loop.run_in_executor(None, ytdl_extract)
             
             if not data:
                 return None
-            
-            if 'entries' in data:
-                data = data['entries'][0] if data.get('entries') else None
-                if not data:
-                    return None
             
             return cls(data, requester)
         except Exception as e:
@@ -210,156 +209,91 @@ class MusicPlayer:
             await self.play_next()
     
     async def play_next(self):
-        """Play next song from queue"""
-        await asyncio.sleep(0.3)
-        
-        self.voice = self.guild.voice_client
-        
-        if not self.voice or not self.voice.is_connected():
+        """Play next song in queue"""
+        if not self.queue:
+            self.current = None
+            if self.voice and self.voice.is_playing():
+                self.voice.stop()
             return
         
         if self.loop and self.current:
-            fresh = await Song.from_query(self.current.url, self.current.requester, self.bot.loop)
-            if fresh:
-                await self.play_song(fresh)
-            else:
-                await self.play_song(self.current)
-            return
-        
-        if self.queue:
-            song = self.queue.pop(0)
-            await self.play_song(song)
+            song = self.current
         else:
-            self.current = None
-            if self.channel:
-                embed = discord.Embed(
-                    title="",
-                    description="```\n🎵 Queue finished! Add more songs with s!play\n```",
-                    color=0x3498DB
-                )
-                await self.channel.send(embed=embed, delete_after=30)
+            song = self.queue.pop(0)
+        
+        await self.play_song(song)
+    
+    def stop(self):
+        """Stop playback and clear queue"""
+        if self.voice and self.voice.is_playing():
+            self.voice.stop()
+        self.queue.clear()
+        self.current = None
     
     async def send_now_playing(self):
-        """Send beautiful now playing embed"""
+        """Send now playing embed"""
         if not self.current:
             return
         
-        song = self.current
-        vol_emoji = self._get_volume_emoji()
-        vol_bar = "█" * int(self.volume * 10) + "░" * (10 - int(self.volume * 10))
-        
-        # Create beautiful embed
-        embed = discord.Embed(color=0x9B59B6)
-        
-        # Title with animated emoji effect
-        embed.title = "▶️ Now Playing"
-        
-        # Song info in a clean format
-        embed.description = f"### 🎵 [{song.title}]({song.url})\n"
-        embed.description += f"```yaml\n"
-        embed.description += f"Artist   : {song.artist[:30]}\n"
-        embed.description += f"Duration : {song.duration_str}\n"
-        embed.description += f"Volume   : {vol_emoji} {int(self.volume*100)}% [{vol_bar}]\n"
-        if self.loop:
-            embed.description += f"Loop     : 🔁 Enabled\n"
-        embed.description += f"```"
-        
-        # Queue info
-        if self.queue:
-            next_songs = "\n".join([f"` {i+1} ` {s.title[:35]}..." if len(s.title) > 35 else f"` {i+1} ` {s.title}" for i, s in enumerate(self.queue[:3])])
-            if len(self.queue) > 3:
-                next_songs += f"\n` + ` *{len(self.queue) - 3} more in queue*"
-            embed.add_field(name="📋 Up Next", value=next_songs, inline=False)
-        
-        # Thumbnail
-        if song.thumbnail:
-            embed.set_thumbnail(url=song.thumbnail)
-        
-        # Footer with controls hint
-        embed.set_footer(
-            text=f"🎧 Requested by {song.requester.display_name} • React to control",
-            icon_url=song.requester.display_avatar.url
-        )
-        
-        embed.timestamp = datetime.now()
-        
-        # Delete old message
+        try:
+            embed = discord.Embed(
+                title="🎵 Now Playing",
+                description=f"[{self.current.title}]({self.current.url})",
+                color=0x3498DB
+            )
+            embed.add_field(name="⏱️ Duration", value=self.current.duration_str, inline=True)
+            embed.add_field(name="👤 Requested by", value=self.current.requester.mention, inline=True)
+            embed.add_field(name="📊 Queue", value=f"{len(self.queue)} songs", inline=True)
+            
+            vol_bar = "█" * int(self.volume * 10) + "░" * (10 - int(self.volume * 10))
+            embed.add_field(name=f"{self._get_volume_emoji()} Volume", value=f"`[{vol_bar}] {int(self.volume*100)}%`", inline=False)
+            
+            if self.loop:
+                embed.add_field(name="🔁 Loop", value="✅ Enabled", inline=True)
+            
+            if self.current.thumbnail:
+                embed.set_thumbnail(url=self.current.thumbnail)
+            
+            if self.now_playing_msg:
+                try:
+                    await self.now_playing_msg.delete()
+                except:
+                    pass
+            
+            self.now_playing_msg = await self.channel.send(embed=embed)
+            
+            # Add control reactions
+            try:
+                await self.now_playing_msg.add_reaction('⏯️')
+                await self.now_playing_msg.add_reaction('⏭️')
+                await self.now_playing_msg.add_reaction('⏹️')
+                await self.now_playing_msg.add_reaction('🔀')
+                await self.now_playing_msg.add_reaction('🔁')
+                await self.now_playing_msg.add_reaction('🔉')
+                await self.now_playing_msg.add_reaction('🔊')
+            except:
+                pass
+        except Exception as e:
+            logger.error(f"Now playing error: {e}")
+    
+    async def update_now_playing(self):
+        """Update now playing embed"""
         if self.now_playing_msg:
             try:
                 await self.now_playing_msg.delete()
             except:
                 pass
-        
-        self.now_playing_msg = await self.channel.send(embed=embed)
-        
-        # Add reactions: Play/Pause, Skip, Stop, Vol Down, Vol Up
-        reactions = ['⏯️', '⏭️', '⏹️', '🔉', '🔊']
-        for emoji in reactions:
-            try:
-                await self.now_playing_msg.add_reaction(emoji)
-                await asyncio.sleep(0.25)
-            except:
-                pass
-    
-    async def update_now_playing(self):
-        """Update the now playing embed"""
-        if not self.current or not self.now_playing_msg:
-            return
-        
-        song = self.current
-        vol_emoji = self._get_volume_emoji()
-        vol_bar = "█" * int(self.volume * 10) + "░" * (10 - int(self.volume * 10))
-        
-        embed = discord.Embed(color=0x9B59B6)
-        embed.title = "▶️ Now Playing"
-        
-        embed.description = f"### 🎵 [{song.title}]({song.url})\n"
-        embed.description += f"```yaml\n"
-        embed.description += f"Artist   : {song.artist[:30]}\n"
-        embed.description += f"Duration : {song.duration_str}\n"
-        embed.description += f"Volume   : {vol_emoji} {int(self.volume*100)}% [{vol_bar}]\n"
-        if self.loop:
-            embed.description += f"Loop     : 🔁 Enabled\n"
-        embed.description += f"```"
-        
-        if self.queue:
-            next_songs = "\n".join([f"` {i+1} ` {s.title[:35]}..." if len(s.title) > 35 else f"` {i+1} ` {s.title}" for i, s in enumerate(self.queue[:3])])
-            if len(self.queue) > 3:
-                next_songs += f"\n` + ` *{len(self.queue) - 3} more in queue*"
-            embed.add_field(name="📋 Up Next", value=next_songs, inline=False)
-        
-        if song.thumbnail:
-            embed.set_thumbnail(url=song.thumbnail)
-        
-        embed.set_footer(
-            text=f"🎧 Requested by {song.requester.display_name} • React to control",
-            icon_url=song.requester.display_avatar.url
-        )
-        embed.timestamp = datetime.now()
-        
-        try:
-            await self.now_playing_msg.edit(embed=embed)
-        except:
-            pass
-    
-    def stop(self):
-        self.queue.clear()
-        self.current = None
-        self.loop = False
-        if self.voice and self.voice.is_playing():
-            self.voice.stop()
+        await self.send_now_playing()
 
 
 # ═══════════════════════════════════════════════════════════════
 # 🎵 MUSIC COG
 # ═══════════════════════════════════════════════════════════════
 
-class MusicSimple(commands.Cog, name="Music"):
-    """🎵 Premium music experience"""
-    
+class MusicSimple(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.players: dict[int, MusicPlayer] = {}
+        self.players: dict = {}
         self.voice_check.start()
     
     def cog_unload(self):
@@ -367,18 +301,24 @@ class MusicSimple(commands.Cog, name="Music"):
     
     @tasks.loop(seconds=60)
     async def voice_check(self):
-        """Keep voice connections alive"""
-        for guild_id in list(self.players.keys()):
-            try:
-                player = self.players[guild_id]
-                if player.voice and player.voice.is_connected():
-                    channel = player.voice.channel
-                    if channel and len([m for m in channel.members if not m.bot]) == 0:
-                        if not config.MUSIC.stay_connected_24_7:
+        """Check if bot should stay in voice"""
+        try:
+            for guild_id, player in list(self.players.items()):
+                if not player.voice or not player.voice.is_connected():
+                    if guild_id in self.players:
+                        del self.players[guild_id]
+                    continue
+                
+                if not player.voice.is_playing() and not player.voice.is_paused():
+                    if not player.queue:
+                        try:
                             await player.voice.disconnect()
+                        except:
+                            pass
+                        if guild_id in self.players:
                             del self.players[guild_id]
-            except:
-                pass
+        except Exception as e:
+            logger.error(f"Voice check error: {e}")
     
     @voice_check.before_loop
     async def before_voice_check(self):
@@ -423,37 +363,46 @@ class MusicSimple(commands.Cog, name="Music"):
         return True
     
     # ═══════════════════════════════════════════════════════════════
-    # 🎵 COMMANDS
+    # 🎵 COMMANDS - PROPERLY DEFERRED
     # ═══════════════════════════════════════════════════════════════
     
     @commands.hybrid_command(name="play", aliases=["p"], description="🎵 Play a song")
     @app_commands.describe(query="Song name or YouTube URL")
     async def play(self, ctx: commands.Context, *, query: str):
+        """Play a song - DEFER IMMEDIATELY for slash commands"""
+        if ctx.interaction:
+            await ctx.interaction.response.defer()
+        
         if not await self.ensure_voice(ctx):
             return
         
         player = self.get_player(ctx)
         
-        embed = discord.Embed(
-            description=f"🔍 **Searching:** `{query}`",
-            color=0x3498DB
-        )
-        loading = await ctx.send(embed=embed)
+        embed = discord.Embed(description=f"🔍 **Searching:** `{query}`", color=0x3498DB)
+        
+        # Send loading message
+        if ctx.interaction:
+            loading = await ctx.interaction.followup.send(embed=embed)
+        else:
+            loading = await ctx.send(embed=embed)
         
         try:
             song = await Song.from_query(query, ctx.author, self.bot.loop)
             
             if not song:
                 embed = discord.Embed(description="❌ **No results found!**", color=0xE74C3C)
-                return await loading.edit(embed=embed, delete_after=5)
+                await loading.edit(embed=embed, delete_after=5)
+                return
             
             if not song.stream_url:
                 embed = discord.Embed(description="❌ **Could not get audio stream!**", color=0xE74C3C)
-                return await loading.edit(embed=embed, delete_after=5)
+                await loading.edit(embed=embed, delete_after=5)
+                return
             
             vc = ctx.voice_client
             
             if vc and (vc.is_playing() or vc.is_paused()):
+                # Add to queue
                 player.queue.append(song)
                 embed = discord.Embed(color=0x2ECC71)
                 embed.description = f"✅ **Added to Queue** • Position #{len(player.queue)}\n\n"
@@ -463,13 +412,23 @@ class MusicSimple(commands.Cog, name="Music"):
                     embed.set_thumbnail(url=song.thumbnail)
                 await loading.edit(embed=embed, delete_after=10)
             else:
-                await loading.delete()
+                # Play immediately
+                try:
+                    await loading.delete()
+                except:
+                    pass
                 await player.play_song(song)
-                
+        
         except Exception as e:
             logger.error(f"Play error: {e}")
             embed = discord.Embed(description=f"❌ **Error:** {str(e)[:100]}", color=0xE74C3C)
-            await loading.edit(embed=embed, delete_after=5)
+            try:
+                await loading.edit(embed=embed, delete_after=5)
+            except:
+                if ctx.interaction:
+                    await ctx.interaction.followup.send(embed=embed, ephemeral=True)
+                else:
+                    await ctx.send(embed=embed, delete_after=5)
     
     @commands.hybrid_command(name="pause", description="⏸️ Pause playback")
     async def pause(self, ctx: commands.Context):
@@ -729,22 +688,22 @@ class MusicSimple(commands.Cog, name="Music"):
             elif vc.is_playing():
                 vc.pause()
                 action_msg = "⏸️ **Paused playback**"
-                
+        
         elif emoji == '⏭️':
             player.loop = False
             vc.stop()
             action_msg = "⏭️ **Skipped to next song**"
-            
+        
         elif emoji == '⏹️':
             player.stop()
             action_msg = "⏹️ **Stopped playback**"
-            
+        
         elif emoji == '🔀':
             if len(player.queue) >= 2:
                 random.shuffle(player.queue)
                 action_msg = f"🔀 **Shuffled {len(player.queue)} songs**"
                 await player.update_now_playing()
-                
+        
         elif emoji == '🔁':
             player.loop = not player.loop
             if player.loop:
@@ -752,7 +711,7 @@ class MusicSimple(commands.Cog, name="Music"):
             else:
                 action_msg = "➡️ **Loop disabled**"
             await player.update_now_playing()
-            
+        
         elif emoji == '🔉':
             old_vol = int(player.volume * 100)
             player.volume = max(0.0, player.volume - 0.1)
@@ -761,7 +720,7 @@ class MusicSimple(commands.Cog, name="Music"):
                 vc.source.volume = player.volume
             action_msg = f"🔉 **Volume:** `{old_vol}%` → `{new_vol}%`"
             await player.update_now_playing()
-            
+        
         elif emoji == '🔊':
             old_vol = int(player.volume * 100)
             player.volume = min(1.0, player.volume + 0.1)
@@ -784,4 +743,3 @@ class MusicSimple(commands.Cog, name="Music"):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(MusicSimple(bot))
-    logger.info("✅ Music cog loaded")
