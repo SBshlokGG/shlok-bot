@@ -20,7 +20,7 @@ import config
 # 🌐 WEB SERVER FOR UPTIME MONITORING
 # ═══════════════════════════════════════════════════════════════
 
-WEB_PORT = int(os.environ.get('PORT', 8000))
+WEB_PORT = int(os.environ.get('PORT', 3000))
 
 async def handle_health(request):
     """Health check endpoint for UptimeRobot"""
@@ -57,62 +57,12 @@ async def handle_home(request):
     """
     return web.Response(text=html, content_type='text/html')
 
-async def handle_upload(request):
-    """Handle file uploads"""
-    try:
-        # Get the project root directory
-        project_root = os.path.dirname(os.path.abspath(__file__))
-        
-        # Read multipart form data
-        reader = await request.multipart()
-        
-        uploaded_files = []
-        
-        async for field in reader:
-            if field.name == 'file':
-                # Get filename
-                filename = field.filename
-                if not filename:
-                    continue
-                
-                # Security: only allow certain files
-                allowed_files = ['config.py', 'bot.py', 'run.py', 'requirements.txt', 'music.py', 'music_simple.py', 'music_new.py', 'utility.py', 'utility_new.py']
-                if filename not in allowed_files:
-                    return web.json_response({
-                        'status': 'error',
-                        'message': f'File {filename} not allowed. Allowed: {allowed_files}'
-                    }, status=400)
-                
-                # Read file content
-                content = await field.read()
-                filepath = os.path.join(project_root, filename)
-                
-                # Write file
-                with open(filepath, 'wb') as f:
-                    f.write(content)
-                
-                uploaded_files.append(filename)
-        
-        return web.json_response({
-            'status': 'success',
-            'message': f'Uploaded {len(uploaded_files)} file(s)',
-            'files': uploaded_files,
-            'note': 'Restart bot to apply changes'
-        })
-    
-    except Exception as e:
-        return web.json_response({
-            'status': 'error',
-            'message': str(e)
-        }, status=500)
-
 async def start_web_server():
     """Start the web server for monitoring"""
     app = web.Application()
     app.router.add_get('/', handle_home)
     app.router.add_get('/health', handle_health)
     app.router.add_get('/ping', handle_health)
-    app.router.add_post('/upload', handle_upload)
     
     runner = web.AppRunner(app)
     await runner.setup()
@@ -178,79 +128,6 @@ logging.basicConfig(
 logger = logging.getLogger('ShlokMusic')
 
 # ═══════════════════════════════════════════════════════════════
-# 🎵 SIMPLE MUSIC PLAYER CLASS
-# ═══════════════════════════════════════════════════════════════
-
-class MusicPlayer:
-    """Simple music player for managing guild audio state"""
-    def __init__(self):
-        self.queue = []
-        self.current = None
-        self.is_playing = False
-        self.is_paused = False
-        self.is_connected = False
-        self.vc = None
-    
-    async def connect(self, channel):
-        """Connect to a voice channel"""
-        try:
-            self.vc = await channel.connect(timeout=10.0, reconnect=True, self_deaf=True)
-            self.is_connected = True
-            return True
-        except Exception as e:
-            logger.error(f"Failed to connect to voice: {e}")
-            self.is_connected = False
-            return False
-    
-    async def disconnect(self):
-        """Disconnect from voice channel"""
-        if self.vc:
-            try:
-                await self.vc.disconnect()
-            except:
-                pass
-        self.is_connected = False
-        self.vc = None
-    
-    async def play(self, track):
-        """Play a track"""
-        if not self.vc:
-            return False
-        try:
-            source = await track.get_source()
-            if not source:
-                return False
-            self.vc.play(source, after=lambda e: None)
-            self.current = track
-            self.is_playing = True
-            self.is_paused = False
-            return True
-        except Exception as e:
-            logger.error(f"Error playing track: {e}")
-            return False
-    
-    def pause(self):
-        """Pause playback"""
-        if self.vc and self.vc.is_playing():
-            self.vc.pause()
-            self.is_paused = True
-            self.is_playing = False
-    
-    def resume(self):
-        """Resume playback"""
-        if self.vc and self.vc.is_paused():
-            self.vc.resume()
-            self.is_paused = False
-            self.is_playing = True
-    
-    def stop(self):
-        """Stop playback"""
-        if self.vc and self.vc.is_playing():
-            self.vc.stop()
-        self.is_playing = False
-        self.is_paused = False
-
-# ═══════════════════════════════════════════════════════════════
 # 🤖 BOT CLASS
 # ═══════════════════════════════════════════════════════════════
 
@@ -265,34 +142,17 @@ class ShlokMusicBot(commands.Bot):
         intents.members = True
         intents.reactions = True
         
-        # Create a prefix function that accepts multiple prefixes
-        def get_prefix(bot, message):
-            # Always respond to mentions
-            prefixes = list(config.BOT_PREFIXES)
-            return commands.when_mentioned_or(*prefixes)(bot, message)
-        
         super().__init__(
-            command_prefix=get_prefix,
+            command_prefix=commands.when_mentioned_or('s!', '$', '!'),
             intents=intents,
             application_id=config.APPLICATION_ID,
             case_insensitive=True,
             strip_after_prefix=True,
             help_command=None,
-            auto_sync_commands=False,
-            enable_debug_events=False,
-            heartbeat_timeout=60.0,
         )
         
         self.start_time = None
         self.activity_index = 0
-        self.players = {}  # Simple player storage
-        self.commands_used = 0  # Track total commands executed
-    
-    def get_player(self, guild_id):
-        """Get or create a music player for a guild"""
-        if guild_id not in self.players:
-            self.players[guild_id] = MusicPlayer()
-        return self.players[guild_id]
         
     async def setup_hook(self):
         """Initialize the bot"""
@@ -300,7 +160,7 @@ class ShlokMusicBot(commands.Bot):
         
         # Load cogs
         cogs = [
-            'cogs.music_invidious',
+            'cogs.music_simple',
             'cogs.utility_new',
         ]
         
@@ -312,6 +172,13 @@ class ShlokMusicBot(commands.Bot):
                 logger.error(f"❌ Failed to load {cog}: {e}")
                 import traceback
                 traceback.print_exc()
+        
+        # Force sync slash commands globally
+        try:
+            synced = await self.tree.sync()
+            logger.info(f"✅ Synced {len(synced)} slash commands globally")
+        except Exception as e:
+            logger.error(f"❌ Failed to sync: {e}")
     
     async def on_ready(self):
         """Bot is ready"""
@@ -323,25 +190,12 @@ class ShlokMusicBot(commands.Bot):
         logger.info(f"👥 Users: {sum(g.member_count for g in self.guilds):,}")
         logger.info(f"🤖 {self.user} (ID: {self.user.id})")
         logger.info(f"📡 Latency: {round(self.latency * 1000)}ms")
-        logger.info(f"🔧 Prefixes: {', '.join(config.BOT_PREFIXES)}")
         logger.info("━" * 50)
-        
-        # Sync slash commands on ready (rate limits are usually reset by then)
-        try:
-            logger.info("🔄 Syncing slash commands...")
-            synced = await self.tree.sync()
-            logger.info(f"✅ Synced {len(synced)} slash commands")
-        except Exception as e:
-            error_msg = str(e)
-            if '429' in error_msg:
-                logger.warning(f"⚠️ Rate limited during sync. Commands will sync when available.")
-            else:
-                logger.error(f"⚠️ Sync error: {error_msg[:100]}")
         
         if not self.rotate_activity.is_running():
             self.rotate_activity.start()
     
-    @tasks.loop(seconds=120)
+    @tasks.loop(seconds=30)
     async def rotate_activity(self):
         """Rotate status"""
         activities = config.BOT_ACTIVITIES

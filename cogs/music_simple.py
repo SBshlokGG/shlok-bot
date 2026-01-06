@@ -35,33 +35,8 @@ YTDL_OPTIONS = {
     'extract_flat': False,
     'cachedir': False,
     'geo_bypass': True,
-    'socket_timeout': 60,
-    'retries': 10,
-    'fragment_retries': 10,
-    'skip_unavailable_fragments': True,
-    'http_headers': {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate',
-        'DNT': '1',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Cache-Control': 'max-age=0',
-    },
-    'extractor_args': {
-        'youtube': {
-            'player_client': ['android', 'web', 'mweb'],
-            'player_skip': ['js', 'configs'],
-            'skip_webpage': False,
-        }
-    },
-    'youtube_include_dash_manifest': False,
-    'writesubtitles': False,
-    'writeautomaticsub': False,
+    'socket_timeout': 15,
+    'retries': 3,
 }
 
 FFMPEG_OPTIONS = {
@@ -131,49 +106,24 @@ class Song:
     @classmethod
     async def from_query(cls, query: str, requester: discord.Member, loop=None) -> Optional['Song']:
         loop = loop or asyncio.get_event_loop()
-        max_retries = 3
-        retry_delay = 2  # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                if not query.startswith('http'):
-                    query = f"ytsearch:{query}"
-                
-                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=False))
-                
+        try:
+            if not query.startswith('http'):
+                query = f"ytsearch:{query}"
+            
+            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=False))
+            
+            if not data:
+                return None
+            
+            if 'entries' in data:
+                data = data['entries'][0] if data.get('entries') else None
                 if not data:
-                    logger.warning(f"No data returned for query: {query}")
                     return None
-                
-                if 'entries' in data:
-                    if not data.get('entries'):
-                        logger.warning(f"No entries found for query: {query}")
-                        return None
-                    data = data['entries'][0]
-                
-                if not data:
-                    logger.warning(f"Data is None for query: {query}")
-                    return None
-                
-                return cls(data, requester)
-            except Exception as e:
-                error_msg = str(e)
-                # Check if it's a bot detection error
-                is_bot_detection = 'bot' in error_msg.lower() or 'sign in' in error_msg.lower()
-                
-                if is_bot_detection and attempt < max_retries - 1:
-                    logger.warning(f"YouTube bot detection (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 1.5  # Exponential backoff
-                    continue
-                else:
-                    if is_bot_detection:
-                        logger.error(f"❌ YouTube is blocking requests after {max_retries} retries. This is a YouTube anti-bot measure.")
-                    else:
-                        logger.error(f"Extract error for query '{query}': {error_msg[:100]}")
-                    return None
-        
-        return None
+            
+            return cls(data, requester)
+        except Exception as e:
+            logger.error(f"Extract error: {e}")
+            return None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -410,13 +360,12 @@ class MusicSimple(commands.Cog, name="Music"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.players: dict[int, MusicPlayer] = {}
-        self.command_cooldowns = {}  # Track command invocations to prevent duplicates
         self.voice_check.start()
     
     def cog_unload(self):
         self.voice_check.cancel()
     
-    @tasks.loop(seconds=120)
+    @tasks.loop(seconds=60)
     async def voice_check(self):
         """Keep voice connections alive"""
         for guild_id in list(self.players.keys()):
@@ -442,25 +391,6 @@ class MusicSimple(commands.Cog, name="Music"):
             self.players[ctx.guild.id].voice = ctx.voice_client
             self.players[ctx.guild.id].channel = ctx.channel
         return self.players[ctx.guild.id]
-    
-    def _check_duplicate_invoke(self, ctx: commands.Context) -> bool:
-        """Prevent hybrid command from invoking twice (slash + prefix)"""
-        import time
-        cmd_key = f"{ctx.guild.id}_{ctx.author.id}_{ctx.command.name}"
-        current_time = time.time()
-        
-        if cmd_key in self.command_cooldowns:
-            last_invoke = self.command_cooldowns[cmd_key]
-            # If invoked within 0.5 seconds, it's a duplicate
-            if current_time - last_invoke < 0.5:
-                return True
-        
-        self.command_cooldowns[cmd_key] = current_time
-        # Clean old entries
-        if len(self.command_cooldowns) > 100:
-            oldest_key = min(self.command_cooldowns, key=self.command_cooldowns.get)
-            del self.command_cooldowns[oldest_key]
-        return False
     
     async def ensure_voice(self, ctx: commands.Context) -> bool:
         if not ctx.author.voice:
@@ -496,74 +426,53 @@ class MusicSimple(commands.Cog, name="Music"):
     # 🎵 COMMANDS
     # ═══════════════════════════════════════════════════════════════
     
-    @app_commands.command(name="play", description="🎵 Play a song")
+    @commands.hybrid_command(name="play", aliases=["p"], description="🎵 Play a song")
     @app_commands.describe(query="Song name or YouTube URL")
-    async def play(self, interaction: discord.Interaction, *, query: str):
-        # Acknowledge the interaction immediately to avoid timeout
-        await interaction.response.defer()
-        
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
+    async def play(self, ctx: commands.Context, *, query: str):
+        if not await self.ensure_voice(ctx):
             return
-        
-        # Check voice channel
-        if not ctx.author.voice or not ctx.author.voice.channel:
-            await interaction.followup.send("❌ You must be in a voice channel!", ephemeral=True)
-            return
-        
-        # Connect to voice if not already connected
-        if not ctx.voice_client:
-            try:
-                await ctx.author.voice.channel.connect(timeout=30.0, reconnect=True, self_deaf=True)
-            except Exception as e:
-                logger.error(f"Connect error: {e}")
-                await interaction.followup.send(f"❌ Could not connect to voice: {str(e)[:50]}", ephemeral=True)
-                return
         
         player = self.get_player(ctx)
         
-        # Send initial search message
-        search_embed = discord.Embed(
+        embed = discord.Embed(
             description=f"🔍 **Searching:** `{query}`",
             color=0x3498DB
         )
-        await interaction.followup.send(embed=search_embed)
+        loading = await ctx.send(embed=embed)
         
         try:
             song = await Song.from_query(query, ctx.author, self.bot.loop)
             
             if not song:
-                error_embed = discord.Embed(description="❌ **No results found!**", color=0xE74C3C)
-                return await interaction.followup.send(embed=error_embed)
+                embed = discord.Embed(description="❌ **No results found!**", color=0xE74C3C)
+                return await loading.edit(embed=embed, delete_after=5)
             
             if not song.stream_url:
-                error_embed = discord.Embed(description="❌ **Could not get audio stream!**", color=0xE74C3C)
-                return await interaction.followup.send(embed=error_embed)
+                embed = discord.Embed(description="❌ **Could not get audio stream!**", color=0xE74C3C)
+                return await loading.edit(embed=embed, delete_after=5)
             
             vc = ctx.voice_client
             
             if vc and (vc.is_playing() or vc.is_paused()):
                 player.queue.append(song)
-                queue_embed = discord.Embed(color=0x2ECC71)
-                queue_embed.description = f"✅ **Added to Queue** • Position #{len(player.queue)}\n\n"
-                queue_embed.description += f"🎵 **[{song.title}]({song.url})**\n"
-                queue_embed.description += f"```yaml\nDuration: {song.duration_str}\n```"
+                embed = discord.Embed(color=0x2ECC71)
+                embed.description = f"✅ **Added to Queue** • Position #{len(player.queue)}\n\n"
+                embed.description += f"🎵 **[{song.title}]({song.url})**\n"
+                embed.description += f"```yaml\nDuration: {song.duration_str}\n```"
                 if song.thumbnail:
-                    queue_embed.set_thumbnail(url=song.thumbnail)
-                await interaction.followup.send(embed=queue_embed)
+                    embed.set_thumbnail(url=song.thumbnail)
+                await loading.edit(embed=embed, delete_after=10)
             else:
+                await loading.delete()
                 await player.play_song(song)
                 
         except Exception as e:
-            logger.error(f"Play error: {e}", exc_info=True)
-            error_embed = discord.Embed(description=f"❌ **Error:** {str(e)[:100]}", color=0xE74C3C)
-            await interaction.followup.send(embed=error_embed)
+            logger.error(f"Play error: {e}")
+            embed = discord.Embed(description=f"❌ **Error:** {str(e)[:100]}", color=0xE74C3C)
+            await loading.edit(embed=embed, delete_after=5)
     
-    @app_commands.command(name="pause", description="⏸️ Pause playback")
-    async def pause(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="pause", description="⏸️ Pause playback")
+    async def pause(self, ctx: commands.Context):
         vc = ctx.voice_client
         if not vc or not vc.is_playing():
             embed = discord.Embed(description="❌ **Nothing is playing!**", color=0xE74C3C)
@@ -572,11 +481,8 @@ class MusicSimple(commands.Cog, name="Music"):
         embed = discord.Embed(description="⏸️ **Paused playback**", color=0xF39C12)
         await ctx.send(embed=embed, delete_after=5)
     
-    @app_commands.command(name="resume", description="▶️ Resume playback")
-    async def resume(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="resume", description="▶️ Resume playback")
+    async def resume(self, ctx: commands.Context):
         vc = ctx.voice_client
         if not vc or not vc.is_paused():
             embed = discord.Embed(description="❌ **Not paused!**", color=0xE74C3C)
@@ -585,11 +491,8 @@ class MusicSimple(commands.Cog, name="Music"):
         embed = discord.Embed(description="▶️ **Resumed playback**", color=0x2ECC71)
         await ctx.send(embed=embed, delete_after=5)
     
-    @app_commands.command(name="skip", description="⏭️ Skip song")
-    async def skip(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="skip", aliases=["s", "next"], description="⏭️ Skip song")
+    async def skip(self, ctx: commands.Context):
         vc = ctx.voice_client
         if not vc or not (vc.is_playing() or vc.is_paused()):
             embed = discord.Embed(description="❌ **Nothing to skip!**", color=0xE74C3C)
@@ -600,11 +503,8 @@ class MusicSimple(commands.Cog, name="Music"):
         embed = discord.Embed(description="⏭️ **Skipped to next song**", color=0x3498DB)
         await ctx.send(embed=embed, delete_after=5)
     
-    @app_commands.command(name="stop", description="⏹️ Stop and clear queue")
-    async def stop(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="stop", description="⏹️ Stop and clear queue")
+    async def stop(self, ctx: commands.Context):
         vc = ctx.voice_client
         if not vc:
             embed = discord.Embed(description="❌ **Not connected!**", color=0xE74C3C)
@@ -613,11 +513,8 @@ class MusicSimple(commands.Cog, name="Music"):
         embed = discord.Embed(description="⏹️ **Stopped playback and cleared queue**", color=0xE74C3C)
         await ctx.send(embed=embed, delete_after=5)
     
-    @app_commands.command(name="queue", description="📋 Show queue")
-    async def queue(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="queue", aliases=["q"], description="📋 Show queue")
+    async def queue(self, ctx: commands.Context):
         player = self.get_player(ctx)
         
         embed = discord.Embed(title="📋 Music Queue", color=0x9B59B6)
@@ -653,12 +550,9 @@ class MusicSimple(commands.Cog, name="Music"):
         
         await ctx.send(embed=embed)
     
-    @app_commands.command(name="volume", description="🔊 Set volume")
+    @commands.hybrid_command(name="volume", aliases=["vol", "v"], description="🔊 Set volume")
     @app_commands.describe(level="Volume level (0-100)")
-    async def volume(self, interaction: discord.Interaction, level: int = None):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    async def volume(self, ctx: commands.Context, level: int = None):
         player = self.get_player(ctx)
         
         if level is None:
@@ -683,11 +577,8 @@ class MusicSimple(commands.Cog, name="Music"):
         await ctx.send(embed=embed, delete_after=5)
         await player.update_now_playing()
     
-    @app_commands.command(name="volumeup", description="🔊 Volume +10%")
-    async def volumeup(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="volumeup", aliases=["vol+", "vu"], description="🔊 Volume +10%")
+    async def volumeup(self, ctx: commands.Context):
         player = self.get_player(ctx)
         old_vol = int(player.volume * 100)
         player.volume = min(1.0, player.volume + 0.1)
@@ -704,11 +595,8 @@ class MusicSimple(commands.Cog, name="Music"):
         await ctx.send(embed=embed, delete_after=5)
         await player.update_now_playing()
     
-    @app_commands.command(name="volumedown", description="🔉 Volume -10%")
-    async def volumedown(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="volumedown", aliases=["vol-", "vd"], description="🔉 Volume -10%")
+    async def volumedown(self, ctx: commands.Context):
         player = self.get_player(ctx)
         old_vol = int(player.volume * 100)
         player.volume = max(0.0, player.volume - 0.1)
@@ -725,11 +613,8 @@ class MusicSimple(commands.Cog, name="Music"):
         await ctx.send(embed=embed, delete_after=5)
         await player.update_now_playing()
     
-    @app_commands.command(name="loop", description="🔁 Toggle loop")
-    async def loop(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="loop", aliases=["repeat"], description="🔁 Toggle loop")
+    async def loop(self, ctx: commands.Context):
         player = self.get_player(ctx)
         player.loop = not player.loop
         if player.loop:
@@ -739,11 +624,8 @@ class MusicSimple(commands.Cog, name="Music"):
         await ctx.send(embed=embed, delete_after=5)
         await player.update_now_playing()
     
-    @app_commands.command(name="shuffle", description="🔀 Shuffle queue")
-    async def shuffle(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="shuffle", description="🔀 Shuffle queue")
+    async def shuffle(self, ctx: commands.Context):
         player = self.get_player(ctx)
         if len(player.queue) < 2:
             embed = discord.Embed(description="❌ **Need 2+ songs to shuffle!**", color=0xE74C3C)
@@ -752,34 +634,25 @@ class MusicSimple(commands.Cog, name="Music"):
         embed = discord.Embed(description=f"🔀 **Shuffled {len(player.queue)} songs!**", color=0x2ECC71)
         await ctx.send(embed=embed, delete_after=5)
     
-    @app_commands.command(name="np", description="🎵 Now playing")
-    async def np(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="np", aliases=["nowplaying", "current"], description="🎵 Now playing")
+    async def np(self, ctx: commands.Context):
         player = self.get_player(ctx)
         if not player.current:
             embed = discord.Embed(description="❌ **Nothing playing!**", color=0xE74C3C)
             return await ctx.send(embed=embed, delete_after=5)
         await player.send_now_playing()
     
-    @app_commands.command(name="clear", description="🗑️ Clear queue")
-    async def clear(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="clear", description="🗑️ Clear queue")
+    async def clear(self, ctx: commands.Context):
         player = self.get_player(ctx)
         count = len(player.queue)
         player.queue.clear()
         embed = discord.Embed(description=f"🗑️ **Cleared {count} songs from queue!**", color=0xF39C12)
         await ctx.send(embed=embed, delete_after=5)
     
-    @app_commands.command(name="remove", description="🗑️ Remove song from queue")
+    @commands.hybrid_command(name="remove", description="🗑️ Remove song from queue")
     @app_commands.describe(position="Position in queue (1, 2, 3...)")
-    async def remove(self, interaction: discord.Interaction, position: int):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    async def remove(self, ctx: commands.Context, position: int):
         player = self.get_player(ctx)
         if position < 1 or position > len(player.queue):
             embed = discord.Embed(description=f"❌ **Invalid position!** Queue has {len(player.queue)} songs.", color=0xE74C3C)
@@ -789,11 +662,8 @@ class MusicSimple(commands.Cog, name="Music"):
         embed = discord.Embed(description=f"🗑️ **Removed:** {removed.title}", color=0xF39C12)
         await ctx.send(embed=embed, delete_after=5)
     
-    @app_commands.command(name="leave", description="👋 Leave voice")
-    async def leave(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="leave", aliases=["dc", "disconnect"], description="👋 Leave voice")
+    async def leave(self, ctx: commands.Context):
         if not ctx.voice_client:
             embed = discord.Embed(description="❌ **Not connected!**", color=0xE74C3C)
             return await ctx.send(embed=embed, delete_after=5)
@@ -806,11 +676,8 @@ class MusicSimple(commands.Cog, name="Music"):
         embed = discord.Embed(description="👋 **Disconnected from voice!**", color=0x3498DB)
         await ctx.send(embed=embed, delete_after=5)
     
-    @app_commands.command(name="join", description="🔗 Join voice channel")
-    async def join(self, interaction: discord.Interaction):
-        ctx = await commands.Context.from_interaction(interaction)
-        if self._check_duplicate_invoke(ctx):
-            return
+    @commands.hybrid_command(name="join", aliases=["connect"], description="🔗 Join voice channel")
+    async def join(self, ctx: commands.Context):
         if not ctx.author.voice:
             embed = discord.Embed(description="❌ **Join a voice channel first!**", color=0xE74C3C)
             return await ctx.send(embed=embed, delete_after=5)
