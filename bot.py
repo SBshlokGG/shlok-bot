@@ -173,10 +173,15 @@ class ShlokMusicBot(commands.Bot):
                 import traceback
                 traceback.print_exc()
         
+        # Wait before syncing to avoid rate limits (Discord needs time after connection)
+        await asyncio.sleep(2)
+        
         # Force sync slash commands globally
         try:
             synced = await self.tree.sync()
             logger.info(f"✅ Synced {len(synced)} slash commands globally")
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ Sync timed out, will retry on next ready")
         except Exception as e:
             logger.error(f"❌ Failed to sync: {e}")
     
